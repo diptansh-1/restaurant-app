@@ -1,15 +1,31 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import Image from 'next/image';
 import { StarIcon, ClockIcon, MapPinIcon } from '@heroicons/react/24/solid';
 import { MOCK_RESTAURANTS, Restaurant } from '../data/restaurants';
-import LocationPicker from '../components/LocationPicker';
 import { calculateDistance, formatDistance, calculateDeliveryTime, formatDeliveryTime } from '../utils/location';
-import L from 'leaflet';
+
+// Dynamically import Leaflet components with ssr: false
+const LocationPicker = dynamic(() => import('../components/LocationPicker'), { ssr: false });
+
+// Dynamically import the RestaurantMap component with ssr: false
+const RestaurantMap = dynamic(() => import('../components/RestaurantMap'), { 
+  ssr: false,
+  loading: () => (
+    <div className="h-full w-full flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-xl">
+      <div className="text-center">
+        <div className="w-12 h-12 rounded-full animate-spin mx-auto mb-3" style={{ 
+          border: '4px solid rgba(78, 205, 196, 0.2)',
+          borderTopColor: '#4ECDC4'
+        }}></div>
+        <p className="text-sm text-gray-500 dark:text-gray-400">Loading map...</p>
+      </div>
+    </div>
+  )
+});
 
 // Extended Restaurant interface with UI-specific properties
 interface RestaurantWithDistance extends Restaurant {
@@ -20,46 +36,52 @@ interface RestaurantWithDistance extends Restaurant {
 // Maximum delivery distance in kilometers
 const MAX_DELIVERY_DISTANCE = 100;
 
-// Create custom marker icons
-function createUserMarkerIcon() {
-  return L.divIcon({
-    className: "custom-icon",
-    html: `<div style="background-color: white; width: 3rem; height: 3rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 3px solid #FF6B6B;">
+// All Leaflet-related code and marker functions are moved to be loaded client-side only
+const createMarkerIcons = () => {
+  // This will only run on the client
+  if (typeof window !== 'undefined') {
+    // Import Leaflet dynamically
+    const L = require('leaflet');
+    
+    const userMarkerIcon = L.divIcon({
+      className: "custom-icon",
+      html: `<div style="background-color: white; width: 3rem; height: 3rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 3px solid #FF6B6B;">
              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="#FF6B6B" stroke-width="2">
                <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
              </svg>
            </div>`,
-    iconSize: [48, 48],
-    iconAnchor: [24, 24],
-  });
-}
-
-function createServiceableMarkerIcon() {
-  return L.divIcon({
-    className: "custom-icon",
-    html: `<div style="background-color: white; width: 3rem; height: 3rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 3px solid #4ECDC4;">
+      iconSize: [48, 48],
+      iconAnchor: [24, 24],
+    });
+    
+    const serviceableMarkerIcon = L.divIcon({
+      className: "custom-icon",
+      html: `<div style="background-color: white; width: 3rem; height: 3rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 3px solid #4ECDC4;">
              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="#4ECDC4" stroke-width="2">
                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349m-16.5 11.65V9.35m0 0a3.001 3.001 0 003.75-.615A2.993 2.993 0 009.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 002.25 1.016c.896 0 1.7-.393 2.25-1.016a3.001 3.001 0 003.75.614m-16.5 0a3.004 3.004 0 01-.621-4.72L4.318 3.44A1.5 1.5 0 015.378 3h13.243a1.5 1.5 0 011.06.44l1.19 1.189a3 3 0 01-.621 4.72m-13.5 8.65h3.75a.75.75 0 00.75-.75V13.5a.75.75 0 00-.75-.75H6.75a.75.75 0 00-.75.75v3.75c0 .415.336.75.75.75z" />
              </svg>
            </div>`,
-    iconSize: [48, 48],
-    iconAnchor: [24, 24],
-  });
-}
-
-function createUnserviceableMarkerIcon() {
-  return L.divIcon({
-    className: "custom-icon",
-    html: `<div style="background-color: white; width: 3rem; height: 3rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 3px solid #d3d3d3; opacity: 0.7;">
+      iconSize: [48, 48],
+      iconAnchor: [24, 24],
+    });
+    
+    const unserviceableMarkerIcon = L.divIcon({
+      className: "custom-icon",
+      html: `<div style="background-color: white; width: 3rem; height: 3rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 3px solid #d3d3d3; opacity: 0.7;">
              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="#9CA3AF" stroke-width="2">
                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349m-16.5 11.65V9.35m0 0a3.001 3.001 0 003.75-.615A2.993 2.993 0 009.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 002.25 1.016c.896 0 1.7-.393 2.25-1.016a3.001 3.001 0 003.75.614m-16.5 0a3.004 3.004 0 01-.621-4.72L4.318 3.44A1.5 1.5 0 015.378 3h13.243a1.5 1.5 0 011.06.44l1.19 1.189a3 3 0 01-.621 4.72m-13.5 8.65h3.75a.75.75 0 00.75-.75V13.5a.75.75 0 00-.75-.75H6.75a.75.75 0 00-.75.75v3.75c0 .415.336.75.75.75z" />
              </svg>
            </div>`,
-    iconSize: [48, 48],
-    iconAnchor: [24, 24],
-  });
-}
+      iconSize: [48, 48],
+      iconAnchor: [24, 24],
+    });
+    
+    return { userMarkerIcon, serviceableMarkerIcon, unserviceableMarkerIcon };
+  }
+  
+  return { userMarkerIcon: null, serviceableMarkerIcon: null, unserviceableMarkerIcon: null };
+};
 
 export default function RestaurantsPage() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number }>({ lat: 28.6139, lng: 77.2090 }); // Delhi
@@ -70,7 +92,7 @@ export default function RestaurantsPage() {
 
   useEffect(() => {
     // Attempt to get user's geolocation
-    if (navigator.geolocation) {
+    if (typeof window !== 'undefined' && navigator.geolocation) {
       const timeoutId = setTimeout(() => {
         setIsLoadingLocation(false);
         setLocationError('Location request timed out. Using default location.');
@@ -143,7 +165,9 @@ export default function RestaurantsPage() {
   const onLocationSelect = (location: { lat: number; lng: number }) => {
     setUserLocation(location);
     // Store the manually selected location in localStorage
-    localStorage.setItem('userSelectedLocation', JSON.stringify(location));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('userSelectedLocation', JSON.stringify(location));
+    }
   };
 
   return (
@@ -336,79 +360,11 @@ export default function RestaurantsPage() {
           </div>
           <div className="h-[500px] w-full">
             {typeof window !== 'undefined' && (
-              <MapContainer 
-                center={[userLocation.lat, userLocation.lng]} 
-                zoom={12} 
-                style={{ height: '100%', width: '100%' }}
-              >
-                <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
-                
-                {/* User marker */}
-                <Marker 
-                  position={[userLocation.lat, userLocation.lng]}
-                  icon={createUserMarkerIcon()}
-                >
-                  <Popup>
-                    <div className="font-medium">Your Location</div>
-                  </Popup>
-                </Marker>
-                
-                {/* Restaurant markers */}
-                {restaurants.map((restaurant) => (
-                  <Marker
-                    key={restaurant.id}
-                    position={[restaurant.location.lat, restaurant.location.lng]}
-                    icon={restaurant.isServicable 
-                      ? createServiceableMarkerIcon()
-                      : createUnserviceableMarkerIcon()}
-                  >
-                    <Popup>
-                      <div>
-                        <div className="font-medium mb-1">{restaurant.name}</div>
-                        <div className="text-sm text-gray-600">{restaurant.cuisine} • {restaurant.priceRange}</div>
-                        <div className="text-sm mt-1">
-                          <span className="font-medium">{formatDistance(restaurant.distance)}</span> from you
-                        </div>
-                        <div className="mt-2">
-                          <Link 
-                            href={`/restaurants/${restaurant.id}`} 
-                            className="text-sm font-medium py-1 px-2 rounded"
-                            style={{ 
-                              background: restaurant.isServicable 
-                                ? 'linear-gradient(to right, rgba(78, 205, 196, 0.1), rgba(78, 205, 196, 0.2))' 
-                                : 'rgba(0,0,0,0.05)',
-                              color: restaurant.isServicable ? '#4ECDC4' : '#9CA3AF',
-                            }}
-                          >
-                            View Restaurant
-                          </Link>
-                        </div>
-                      </div>
-                    </Popup>
-                  </Marker>
-                ))}
-                
-                {/* Update map center when user location changes */}
-                <MapController center={[userLocation.lat, userLocation.lng]} />
-              </MapContainer>
+              <RestaurantMap userLocation={userLocation} restaurants={restaurants} />
             )}
           </div>
         </div>
       </div>
     </div>
   );
-}
-
-// Helper component to update map center
-function MapController({ center }: { center: [number, number] }) {
-  const map = useMap();
-  
-  useEffect(() => {
-    map.setView(center);
-  }, [center, map]);
-  
-  return null;
 } 
